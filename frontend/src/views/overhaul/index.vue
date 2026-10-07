@@ -67,6 +67,69 @@
       <span>共 {{ total }} 条设备检修管理记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
+
+    <section class="ledger-block">
+      <header class="ledger-head">
+        <div>
+          <h3>备件领用台账（与备件台账在库量核对）</h3>
+          <p class="page-desc">备件办理领用后自动回写；同一检修单内同一备件编号只记一次，累计领用数量合并显示。</p>
+        </div>
+        <div class="ledger-tools">
+          <select v-model="ledgerFilter" class="ledger-select">
+            <option value="">全部检修单</option>
+            <option v-for="row in rows" :key="String(row.id)" :value="String(row['检修编号'])">
+              {{ String(row['检修编号']) }}
+            </option>
+          </select>
+          <button class="btn" type="button" @click="loadLedger">刷新核对</button>
+        </div>
+      </header>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th>检修编号</th>
+            <th>检修设备</th>
+            <th>备件编号</th>
+            <th>备件名称</th>
+            <th>规格型号</th>
+            <th>累计领用数量</th>
+            <th>领后在库量</th>
+            <th>备件台账当前在库量</th>
+            <th>核对结果</th>
+            <th>领用人</th>
+            <th>最近领用时间</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in ledger" :key="`${item.检修编号}-${item.备件编号}`">
+            <td>{{ item.检修编号 }}</td>
+            <td>{{ item.检修设备 }}</td>
+            <td>{{ item.备件编号 }}</td>
+            <td>{{ item.备件名称 }}</td>
+            <td>{{ item.规格型号 }}</td>
+            <td>{{ item.累计领用数量 }}</td>
+            <td>{{ item.领后在库量 }}</td>
+            <td>{{ item.当前在库量 }}</td>
+            <td>
+              <span :class="item.核对一致 ? 'tag tag-ok' : 'tag tag-warn'">
+                {{ item.核对一致 ? '对得上' : '对不上' }}
+              </span>
+            </td>
+            <td>{{ item.领用人 }}</td>
+            <td>{{ item.领用时间 }}</td>
+          </tr>
+          <tr v-if="!ledger.length">
+            <td colspan="11" class="empty-state">暂无备件领用记录，备件台账办理领用后会回写到这里</td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-if="ledger.length" class="ledger-summary">
+        共 {{ ledger.length }} 条台账（同一备件编号只记一次），
+        <span :class="mismatchCount === 0 ? 'success-text' : 'error-text'">
+          {{ mismatchCount === 0 ? '全部与备件台账在库量对得上' : `有 ${mismatchCount} 条对不上` }}
+        </span>
+      </p>
+    </section>
   </section>
 </template>
 
@@ -76,10 +139,11 @@ import { computed, onMounted, ref } from 'vue'
 import {
   downloadEntries,
   listEntries,
+  listRequisitionLedger,
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
-import type { EntryRow } from '@/data/types'
+import type { EntryRow, RequisitionLedgerRow } from '@/data/types'
 
 const meta = moduleMeta('overhaul')
 const columns = ["检修编号", "检修设备", "检修类别", "检修班组", "计划工期", "完工日期", "更换备件", "检修状态"]
@@ -92,6 +156,14 @@ const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+const ledger = ref<RequisitionLedgerRow[]>([])
+const ledgerFilter = ref('')
+const mismatchCount = ref(0)
+
+function loadLedger() {
+  ledger.value = listRequisitionLedger(ledgerFilter.value)
+  mismatchCount.value = ledger.value.filter((item) => !item.核对一致).length
+}
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
@@ -128,6 +200,7 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    loadLedger()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '设备检修管理列表读取失败'
   }
