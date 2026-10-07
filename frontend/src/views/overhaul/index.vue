@@ -2,8 +2,8 @@
   <section class="page" data-module="overhaul">
     <header class="page-head">
       <div>
-        <h2>设备检修管理管理</h2>
-        <p class="page-desc">维护检修记录，围绕检修编号、检修设备、检修类别、检修班组做登记、筛选与状态流转。</p>
+        <h2>设备检修管理</h2>
+        <p class="page-desc">维护检修记录，围绕检修编号、检修设备、检修类别、检修班组做登记、筛选与状态流转；备件领用结果回写本页领用台账。</p>
       </div>
       <div class="page-actions">
         <button class="btn primary" type="button" @click="openCreate">登记检修记录</button>
@@ -63,8 +63,42 @@
       </tbody>
     </table>
 
+    <section class="ledger-block">
+      <header class="ledger-head">
+        <div>
+          <h3>备件领用台账</h3>
+          <p class="page-desc">
+            由备件台账「办理领用」自动回写；同一备件编号重复登记只记一次（更新原记录）。
+            「更换备件」列标注的领后在库量与备件台账在库量一致，可逐条对账。
+          </p>
+        </div>
+        <button class="btn ghost" type="button" @click="reload">刷新对账</button>
+      </header>
+      <table class="data-table">
+        <thead>
+          <tr>
+            <th v-for="column in ledgerColumns" :key="column">{{ column }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="item in requisitions" :key="String(item.id)">
+            <td v-for="column in ledgerColumns" :key="column" :class="{ 'mismatch-cell': column === '对账状态' && !checkItem(item).ok }">
+              <template v-if="column === '对账状态'">
+                <span v-if="checkItem(item).ok" class="tag tag-ok">与备件在库量一致</span>
+                <span v-else class="tag tag-warn">{{ checkItem(item).message }}</span>
+              </template>
+              <template v-else>{{ item[column as keyof typeof item] ?? '—' }}</template>
+            </td>
+          </tr>
+          <tr v-if="!requisitions.length">
+            <td :colspan="ledgerColumns.length" class="empty-state">暂无备件领用记录，备件办理领用后自动回写到这里</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
     <footer class="page-foot">
-      <span>共 {{ total }} 条设备检修管理记录</span>
+      <span>共 {{ total }} 条设备检修管理记录，{{ requisitions.length }} 条备件领用记录</span>
       <span v-if="errorMessage" class="error-text">{{ errorMessage }}</span>
     </footer>
   </section>
@@ -79,10 +113,13 @@ import {
   moduleMeta,
   runAction as applyAction,
 } from '@/api/local-service'
-import type { EntryRow } from '@/data/types'
+import { listRequisitionRows } from '@/api/spare-service'
+import { listRows } from '@/data/local-store'
+import type { EntryRow, RequisitionRow } from '@/data/types'
 
 const meta = moduleMeta('overhaul')
 const columns = ["检修编号", "检修设备", "检修类别", "检修班组", "计划工期", "完工日期", "更换备件", "检修状态"]
+const ledgerColumns = ["检修编号", "备件编号", "备件名称", "规格型号", "所属系统", "领用数量", "领用后在库量", "领用人", "领用时间", "对账状态"]
 const actions = ["提交开工", "确认完工", "申请延期"]
 const statuses = ["待开工", "检修中", "已完工", "已延期"]
 const stats = [{"label": "待开工检修", "value": 0}, {"label": "检修中记录", "value": 0}, {"label": "本月完工数", "value": 0}]
@@ -92,12 +129,28 @@ const total = ref(0)
 const errorMessage = ref('')
 const filters = ref<Record<string, string>>({})
 const filterFields = columns.slice(0, 3)
+const requisitions = ref<RequisitionRow[]>([])
+const spareRows = ref<EntryRow[]>([])
+
 const statusSummary = computed(() =>
   statuses.map((status: string) => ({
     status,
     count: rows.value.filter((row) => String(row.status) === status).length,
   })),
 )
+
+// 对账：领用台账的「领用后在库量」必须等于备件台账当前在库量，避免领用后两边对不上。
+function checkItem(item: RequisitionRow): { ok: boolean; message: string } {
+  const spare = spareRows.value.find((row) => String(row.备件编号 ?? '') === item.备件编号)
+  if (!spare) {
+    return { ok: false, message: '备件台账查无此编号' }
+  }
+  const current = Number(String(spare.在库量 ?? '0').trim())
+  if (current !== item.领用后在库量) {
+    return { ok: false, message: `与在库量不符（台账${item.领用后在库量}/在库${current}）` }
+  }
+  return { ok: true, message: '' }
+}
 
 function resetFilters() {
   filters.value = {}
@@ -128,6 +181,8 @@ function reload() {
     const payload = listEntries(meta.key, filters.value)
     rows.value = payload.items
     total.value = payload.total
+    requisitions.value = listRequisitionRows()
+    spareRows.value = listRows('spare')
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '设备检修管理列表读取失败'
   }

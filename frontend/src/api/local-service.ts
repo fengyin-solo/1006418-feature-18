@@ -73,15 +73,35 @@ export function exportEntries(key: string): { filename: string; content: string 
 
 export function downloadEntries(key: string): void {
   const { filename, content } = exportEntries(key)
-  const blob = new Blob([content], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename
-  document.body.appendChild(anchor)
-  anchor.click()
-  document.body.removeChild(anchor)
-  URL.revokeObjectURL(url)
+  downloadTextFile(filename, content, 'text/csv;charset=utf-8')
+}
+
+/** 触发浏览器下载；Blob、anchor、click 任一环节失败都抛错，调用方负责提示并允许重试。 */
+export function downloadTextFile(
+  filename: string,
+  content: string,
+  mimeType = 'text/csv;charset=utf-8',
+): void {
+  if (!content) {
+    throw new Error('导出内容为空，已终止下载')
+  }
+  let url = ''
+  try {
+    const blob = new Blob([content], { type: mimeType })
+    url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename
+    document.body.appendChild(anchor)
+    anchor.click()
+    document.body.removeChild(anchor)
+  } catch (error) {
+    throw new Error(`文件导出失败：${error instanceof Error ? error.message : '浏览器不支持下载'}，请重新导出一次`)
+  } finally {
+    if (url) {
+      URL.revokeObjectURL(url)
+    }
+  }
 }
 
 export function loadOverview(): OverviewResult {

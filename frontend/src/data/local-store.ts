@@ -1,8 +1,10 @@
-import { SEED_ROWS } from './seed'
-import type { EntryRow } from './types'
+import { SEED_REQUISITIONS, SEED_ROWS } from './seed'
+import type { EntryRow, RequisitionRow } from './types'
 
 // 本地持久化：数据放在 localStorage 里，刷新、关掉再打开都还在。
-const STORAGE_KEY = 'waste-to-energy-plant:entries'
+// v2：备件台账增加在库量、领用数量等字段，旧版本缓存结构不再兼容，直接重新播种。
+const STORAGE_KEY = 'waste-to-energy-plant:entries:v2'
+const REQUISITION_KEY = 'waste-to-energy-plant:requisitions:v1'
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
@@ -56,4 +58,37 @@ export function resetRows(key: string): EntryRow[] {
 
 export function storageKey(): string {
   return STORAGE_KEY
+}
+
+// 备件领用台账独立存储：由备件办理领用动作回写，设备检修页面直接读取。
+export function listRequisitions(): RequisitionRow[] {
+  if (typeof window === 'undefined' || !window.localStorage) {
+    return clone(SEED_REQUISITIONS)
+  }
+  const raw = window.localStorage.getItem(REQUISITION_KEY)
+  if (!raw) {
+    const fallback = clone(SEED_REQUISITIONS)
+    window.localStorage.setItem(REQUISITION_KEY, JSON.stringify(fallback))
+    return fallback
+  }
+  try {
+    const parsed = JSON.parse(raw) as RequisitionRow[]
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    const fallback = clone(SEED_REQUISITIONS)
+    window.localStorage.setItem(REQUISITION_KEY, JSON.stringify(fallback))
+    return fallback
+  }
+}
+
+export function saveRequisitions(rows: RequisitionRow[]): void {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    window.localStorage.setItem(REQUISITION_KEY, JSON.stringify(rows))
+  }
+}
+
+export function resetRequisitions(): RequisitionRow[] {
+  const rows = clone(SEED_REQUISITIONS)
+  saveRequisitions(rows)
+  return rows
 }
